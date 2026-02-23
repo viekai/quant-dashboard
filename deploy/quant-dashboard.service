@@ -1,0 +1,15 @@
+[Unit]
+Description=Quant Dashboard API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/quant-dashboard/backend
+Environment=DASHBOARD_TOKEN=changeme
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
