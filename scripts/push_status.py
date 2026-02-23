@@ -20,7 +20,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 # Configuration
-DEFAULT_SERVER = "http://39.96.211.212:8000"
+DEFAULT_SERVER = "http://39.96.211.212/quant"
 TOKEN = os.environ.get("DASHBOARD_TOKEN", "changeme")
 PROJECT_DIR = Path(r"C:\Users\kai\quant_factor_model")
 

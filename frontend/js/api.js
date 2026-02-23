@@ -1,5 +1,10 @@
 const API = {
-  baseUrl: '',
+  // Auto-detect base path from current page location
+  baseUrl: (() => {
+    const path = window.location.pathname;
+    const match = path.match(/^(\/[^/]+)\//);
+    return match ? match[1] : '';
+  })(),
 
   async _get(path) {
     try {

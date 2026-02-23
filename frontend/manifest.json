@@ -1,7 +1,8 @@
 {
   "name": "量化监控 Dashboard",
   "short_name": "量化",
-  "start_url": "/",
+  "start_url": "/quant/",
+  "scope": "/quant/",
   "display": "standalone",
   "background_color": "#1a1a2e",
   "theme_color": "#16213e",

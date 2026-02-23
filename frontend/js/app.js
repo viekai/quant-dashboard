@@ -228,7 +228,7 @@ async function loadFactors() {
 document.addEventListener('DOMContentLoaded', () => {
   // Service worker
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
   }
 
   // Tab clicks

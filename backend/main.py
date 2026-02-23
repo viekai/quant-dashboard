@@ -1,8 +1,6 @@
 import os
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 from database import Database
 from models import StatusPush, PortfolioPush, NavPush, TradePush, SignalPush
@@ -106,8 +104,5 @@ async def get_factor_weights():
     return FACTOR_WEIGHTS
 
 
-# ---- Static files (frontend) ----
-
-frontend_dir = Path(__file__).parent.parent / "frontend"
-if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+# Static files served by nginx in production.
+# For local dev: python -m uvicorn main:app, then open frontend/index.html directly.

@@ -1,11 +1,12 @@
 const CACHE_NAME = 'quant-dash-v1';
+const BASE = '/quant/';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/css/style.css',
-  '/js/api.js',
-  '/js/charts.js',
-  '/js/app.js',
+  BASE,
+  BASE + 'index.html',
+  BASE + 'css/style.css',
+  BASE + 'js/api.js',
+  BASE + 'js/charts.js',
+  BASE + 'js/app.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -28,7 +29,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Network-first for API calls
-  if (url.pathname.startsWith('/api/')) {
+  if (url.pathname.includes('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() => caches.match(event.request))
     );
