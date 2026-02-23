@@ -1,11 +1,14 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException, Header
+import secrets
+from fastapi import FastAPI, Depends, HTTPException, Header, Cookie, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from database import Database
 from models import StatusPush, PortfolioPush, NavPush, TradePush, SignalPush
 
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "changeme")
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "quant2026")
 
 app = FastAPI(title="Quant Dashboard API")
 
@@ -17,6 +20,9 @@ app.add_middleware(
 )
 
 db = Database()
+
+# Session tokens for web login (in-memory, restarts clear sessions)
+_valid_sessions: set[str] = set()
 
 FACTOR_WEIGHTS = {
     "volatility_60d": 22.0,
@@ -35,6 +41,32 @@ FACTOR_WEIGHTS = {
 async def verify_token(authorization: str = Header(...)):
     if authorization != f"Bearer {DASHBOARD_TOKEN}":
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+async def verify_session(session: str = Cookie(default="")):
+    if session not in _valid_sessions:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+# ---- Auth endpoints ----
+
+@app.post("/api/auth/login")
+async def login(request: Request, response: Response):
+    body = await request.json()
+    if body.get("password") != DASHBOARD_PASSWORD:
+        raise HTTPException(status_code=401, detail="Wrong password")
+    token = secrets.token_urlsafe(32)
+    _valid_sessions.add(token)
+    response.set_cookie(
+        key="session", value=token, httponly=True,
+        max_age=86400 * 30, samesite="lax",
+    )
+    return {"ok": True}
+
+
+@app.get("/api/auth/check")
+async def auth_check(session: str = Cookie(default="")):
+    return {"authenticated": session in _valid_sessions}
 
 
 # ---- Push endpoints (require token) ----
@@ -69,38 +101,38 @@ async def push_signal(data: SignalPush, _=Depends(verify_token)):
     return {"ok": True}
 
 
-# ---- Read endpoints (public) ----
+# ---- Read endpoints (require session cookie) ----
 
 @app.get("/api/status/latest")
-async def get_status():
+async def get_status(_=Depends(verify_session)):
     data = db.get_latest_status()
     return data or {"message": "no data"}
 
 
 @app.get("/api/portfolio/current")
-async def get_portfolio():
+async def get_portfolio(_=Depends(verify_session)):
     data = db.get_current_portfolio()
     return data or {"message": "no data"}
 
 
 @app.get("/api/nav")
-async def get_nav(days: int = 30):
+async def get_nav(days: int = 30, _=Depends(verify_session)):
     return db.get_nav(days)
 
 
 @app.get("/api/trades")
-async def get_trades(limit: int = 50):
+async def get_trades(limit: int = 50, _=Depends(verify_session)):
     return db.get_trades(limit)
 
 
 @app.get("/api/signal/latest")
-async def get_signal():
+async def get_signal(_=Depends(verify_session)):
     data = db.get_latest_signal()
     return data or {"message": "no data"}
 
 
 @app.get("/api/factor/weights")
-async def get_factor_weights():
+async def get_factor_weights(_=Depends(verify_session)):
     return FACTOR_WEIGHTS
 
 

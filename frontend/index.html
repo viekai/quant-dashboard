@@ -11,59 +11,72 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <nav class="nav">
-    <div class="nav-item active" data-tab="status">状态总览</div>
-    <div class="nav-item" data-tab="portfolio">持仓交易</div>
-    <div class="nav-item" data-tab="nav">收益曲线</div>
-    <div class="nav-item" data-tab="factors">因子权重</div>
-  </nav>
-
-  <div class="container">
-    <!-- Status -->
-    <div id="tab-status" class="tab-content active">
-      <div id="status-content"><div class="empty">加载中...</div></div>
-    </div>
-
-    <!-- Portfolio -->
-    <div id="tab-portfolio" class="tab-content">
-      <div id="portfolio-content"><div class="empty">加载中...</div></div>
-    </div>
-
-    <!-- NAV -->
-    <div id="tab-nav" class="tab-content">
-      <div class="period-btns">
-        <button class="period-btn" data-days="30">30天</button>
-        <button class="period-btn active" data-days="90">90天</button>
-        <button class="period-btn" data-days="180">180天</button>
-        <button class="period-btn" data-days="365">1年</button>
-        <button class="period-btn" data-days="0">全部</button>
-      </div>
-      <div id="nav-stats" class="cards"></div>
-      <div class="chart-wrap" style="height:300px">
-        <canvas id="nav-chart"></canvas>
-      </div>
-      <div class="chart-wrap" style="height:200px">
-        <canvas id="dd-chart"></canvas>
-      </div>
-    </div>
-
-    <!-- Factors -->
-    <div id="tab-factors" class="tab-content">
-      <div id="factors-content">
-        <div class="factor-grid">
-          <div class="chart-wrap" style="height:350px">
-            <canvas id="radar-chart"></canvas>
-          </div>
-          <div class="chart-wrap" style="height:350px">
-            <canvas id="bar-chart"></canvas>
-          </div>
-        </div>
-        <div class="section" id="factor-table"></div>
-      </div>
+  <!-- Login screen -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-box">
+      <h2>量化监控</h2>
+      <input type="password" id="login-password" placeholder="输入密码" autocomplete="current-password">
+      <button id="login-btn">登录</button>
+      <div id="login-error" class="login-error"></div>
     </div>
   </div>
 
-  <footer class="footer">量化监控 Dashboard v1.0</footer>
+  <!-- Main app (hidden until login) -->
+  <div id="main-app" style="display:none">
+    <nav class="nav">
+      <div class="nav-item active" data-tab="status">状态总览</div>
+      <div class="nav-item" data-tab="portfolio">持仓交易</div>
+      <div class="nav-item" data-tab="nav">收益曲线</div>
+      <div class="nav-item" data-tab="factors">因子权重</div>
+    </nav>
+
+    <div class="container">
+      <!-- Status -->
+      <div id="tab-status" class="tab-content active">
+        <div id="status-content"><div class="empty">加载中...</div></div>
+      </div>
+
+      <!-- Portfolio -->
+      <div id="tab-portfolio" class="tab-content">
+        <div id="portfolio-content"><div class="empty">加载中...</div></div>
+      </div>
+
+      <!-- NAV -->
+      <div id="tab-nav" class="tab-content">
+        <div class="period-btns">
+          <button class="period-btn" data-days="30">30天</button>
+          <button class="period-btn active" data-days="90">90天</button>
+          <button class="period-btn" data-days="180">180天</button>
+          <button class="period-btn" data-days="365">1年</button>
+          <button class="period-btn" data-days="0">全部</button>
+        </div>
+        <div id="nav-stats" class="cards"></div>
+        <div class="chart-wrap" style="height:300px">
+          <canvas id="nav-chart"></canvas>
+        </div>
+        <div class="chart-wrap" style="height:200px">
+          <canvas id="dd-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Factors -->
+      <div id="tab-factors" class="tab-content">
+        <div id="factors-content">
+          <div class="factor-grid">
+            <div class="chart-wrap" style="height:350px">
+              <canvas id="radar-chart"></canvas>
+            </div>
+            <div class="chart-wrap" style="height:350px">
+              <canvas id="bar-chart"></canvas>
+            </div>
+          </div>
+          <div class="section" id="factor-table"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">量化监控 Dashboard v1.1</footer>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="js/api.js"></script>

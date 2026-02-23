@@ -15,6 +15,7 @@ class StatusPush(BaseModel):
 
 class Position(BaseModel):
     code: str
+    name: str = ""
     shares: int = 0
     cost_price: float = 0.0
     current_price: float = 0.0

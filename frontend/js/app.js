@@ -2,6 +2,33 @@
 const TABS = ['status', 'portfolio', 'nav', 'factors'];
 let refreshTimer = null;
 
+// ---- Login ----
+function showLogin() {
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('main-app').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('main-app').style.display = '';
+}
+
+async function handleLogin() {
+  const pw = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  if (!pw) { errEl.textContent = '请输入密码'; return; }
+  const ok = await API.login(pw);
+  if (ok) {
+    showApp();
+    const hash = window.location.hash.slice(1);
+    switchTab(TABS.includes(hash) ? hash : 'status');
+  } else {
+    errEl.textContent = '密码错误';
+  }
+}
+
+// ---- Tabs ----
 function switchTab(tab) {
   if (!TABS.includes(tab)) tab = 'status';
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -98,11 +125,11 @@ async function loadPortfolio() {
       <div class="section-title">当前持仓 (${portfolio.positions.length})</div>
       <div class="timestamp">更新: ${portfolio.timestamp || '-'}</div>
       <table>
-        <tr><th>代码</th><th>股数</th><th>成本价</th><th>现价</th><th>盈亏%</th></tr>
+        <tr><th>代码</th><th>名称</th><th>股数</th><th>成本价</th><th>现价</th><th>盈亏%</th></tr>
         ${portfolio.positions.map(p => {
           const cls = p.pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg';
           return `<tr>
-            <td>${p.code}</td><td>${p.shares}</td>
+            <td>${p.code}</td><td>${p.name || '-'}</td><td>${p.shares}</td>
             <td>${p.cost_price.toFixed(2)}</td><td>${p.current_price.toFixed(2)}</td>
             <td class="${cls}">${(p.pnl_pct * 100).toFixed(2)}%</td>
           </tr>`;
@@ -143,9 +170,9 @@ async function loadPortfolio() {
     <div class="section">
       <div class="section-title">最新信号 (${signal.timestamp || '-'})</div>
       <table>
-        <tr><th>代码</th><th>权重</th></tr>
+        <tr><th>代码</th><th>名称</th><th>权重</th></tr>
         ${signal.signals.slice(0, 20).map(s =>
-          `<tr><td>${s.code || '-'}</td><td>${s.weight ? (s.weight * 100).toFixed(1) + '%' : '-'}</td></tr>`
+          `<tr><td>${s.code || '-'}</td><td>${s.name || '-'}</td><td>${s.weight ? (s.weight * 100).toFixed(1) + '%' : '-'}</td></tr>`
         ).join('')}
       </table>
     </div>`;
@@ -160,7 +187,6 @@ let currentPeriod = 90;
 async function loadNav(days) {
   if (days !== undefined) currentPeriod = days;
   const navData = await API.getNav(currentPeriod === 0 ? 99999 : currentPeriod);
-  const el = document.getElementById('nav-content');
 
   // Update period buttons
   document.querySelectorAll('.period-btn').forEach(btn => {
@@ -168,7 +194,9 @@ async function loadNav(days) {
   });
 
   if (!navData || !navData.length) {
-    el.innerHTML = '<div class="empty">暂无净值数据</div>';
+    document.getElementById('nav-stats').innerHTML = '';
+    renderNavChart('nav-chart', []);
+    renderDrawdownChart('dd-chart', []);
     return;
   }
 
@@ -225,23 +253,41 @@ async function loadFactors() {
 }
 
 // ---- Init ----
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // Service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
   }
 
-  // Tab clicks
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.addEventListener('click', () => switchTab(el.dataset.tab));
+  // Login handlers
+  document.getElementById('login-btn').addEventListener('click', handleLogin);
+  document.getElementById('login-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleLogin();
   });
 
-  // Period buttons
-  document.querySelectorAll('.period-btn').forEach(btn => {
-    btn.addEventListener('click', () => loadNav(parseInt(btn.dataset.days)));
-  });
-
-  // Hash routing
-  const hash = window.location.hash.slice(1);
-  switchTab(TABS.includes(hash) ? hash : 'status');
+  // Check existing session
+  const authed = await API.checkAuth();
+  if (authed) {
+    showApp();
+    // Tab clicks
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.addEventListener('click', () => switchTab(el.dataset.tab));
+    });
+    // Period buttons
+    document.querySelectorAll('.period-btn').forEach(btn => {
+      btn.addEventListener('click', () => loadNav(parseInt(btn.dataset.days)));
+    });
+    // Hash routing
+    const hash = window.location.hash.slice(1);
+    switchTab(TABS.includes(hash) ? hash : 'status');
+  } else {
+    showLogin();
+    // Still bind event listeners for after login
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.addEventListener('click', () => switchTab(el.dataset.tab));
+    });
+    document.querySelectorAll('.period-btn').forEach(btn => {
+      btn.addEventListener('click', () => loadNav(parseInt(btn.dataset.days)));
+    });
+  }
 });

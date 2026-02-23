@@ -127,8 +127,32 @@ def collect_status():
     return status
 
 
+def load_stock_names():
+    """Load stock code → name mapping from baostock.db industry table."""
+    names = {}
+    db_path = PROJECT_DIR / "data" / "baostock.db"
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(str(db_path))
+            for row in conn.execute("SELECT code, code_name FROM industry WHERE code_name IS NOT NULL"):
+                # industry table uses SH.600519 format
+                names[row[0]] = row[1]
+                # Also store lowercase variant for matching
+                names[row[0].lower()] = row[1]
+            conn.close()
+        except Exception:
+            pass
+    return names
+
+
+def get_stock_name(code, names):
+    """Look up stock name, trying both original and upper/lower case."""
+    return names.get(code, "") or names.get(code.upper(), "") or names.get(code.lower(), "")
+
+
 def collect_portfolio():
     """Collect current portfolio from latest live signal or stoploss data."""
+    names = load_stock_names()
     portfolio = {
         "timestamp": datetime.now().isoformat(),
         "positions": [],
@@ -147,7 +171,6 @@ def collect_portfolio():
             pass
 
     # Try to read positions from latest output
-    # The actual positions come from QMT or the latest signal
     output_dir = PROJECT_DIR / "output"
     signal_files = sorted(output_dir.glob("live_signal_*.csv"), reverse=True)
     if signal_files:
@@ -156,8 +179,10 @@ def collect_portfolio():
             with open(signal_files[0]) as f:
                 reader = csv.DictReader(f)
                 for row in reader:
+                    code = row.get("code", "")
                     pos = {
-                        "code": row.get("code", ""),
+                        "code": code,
+                        "name": get_stock_name(code, names),
                         "shares": int(float(row.get("shares", 0))),
                         "cost_price": float(row.get("cost_price", 0)),
                         "current_price": float(row.get("current_price", 0)),
