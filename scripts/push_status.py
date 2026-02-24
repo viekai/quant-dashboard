@@ -49,6 +49,97 @@ def post_json(server, endpoint, data):
     return None
 
 
+LOG_DIR = Path(r"C:\Users\kai\logs\quant")
+
+
+def _parse_task_log(log_path, task_name):
+    """Parse a task log file and extract sub-task results."""
+    result = {"name": task_name, "status": "unknown", "subtasks": [], "time": ""}
+    if not log_path.exists():
+        result["status"] = "no_log"
+        return result
+
+    try:
+        raw = log_path.read_bytes()
+        # Windows cmd outputs GBK; try both encodings
+        for enc in ["utf-8", "gbk", "cp936"]:
+            try:
+                content = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            content = raw.decode("utf-8", errors="replace")
+        lines = content.strip().splitlines()
+    except Exception:
+        result["status"] = "read_error"
+        return result
+
+    # Check if completed (has "Done" line)
+    done_line = [l for l in lines if "Done" in l and "=====" in l]
+    skip_line = [l for l in lines if "[SKIP]" in l]
+
+    if skip_line:
+        result["status"] = "skipped"
+        result["subtasks"].append({"step": "交易日检查", "result": "非交易日，跳过"})
+        return result
+
+    # Extract start/end times
+    # Log format: "===== Rebalance 2026-02-24  9:31:02.24 ====="
+    import re
+    for l in lines:
+        if "=====" in l and task_name.lower() in l.lower():
+            m = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})', l)
+            if m:
+                result["time"] = f"{m.group(1)} {m.group(2)}"
+                break
+
+    if done_line:
+        result["status"] = "done"
+    elif lines:
+        result["status"] = "running"
+
+    # Parse sub-tasks from log content
+    if task_name == "Rebalance":
+        # sell-stoploss result
+        if "No stocks to sell" in content:
+            result["subtasks"].append({"step": "止损卖出", "result": "无待卖出"})
+        elif "Pending sells (T+1):" in content:
+            for l in lines:
+                if "Pending sells" in l:
+                    result["subtasks"].append({"step": "止损卖出", "result": l.split(":")[-1].strip()})
+                    break
+        elif "sell-stoploss" in content.lower():
+            result["subtasks"].append({"step": "止损卖出", "result": "执行中"})
+
+        # live rebalance result
+        if "不在调仓窗口" in content:
+            result["subtasks"].append({"step": "月度调仓", "result": "非调仓窗口，跳过"})
+        elif "调仓完成" in content or "Rebalance complete" in content:
+            result["subtasks"].append({"step": "月度调仓", "result": "已完成"})
+        elif "live" in content.lower() and "Rebalance check" in content:
+            result["subtasks"].append({"step": "月度调仓", "result": "执行中"})
+
+    elif task_name == "Stoploss":
+        # check-stoploss result
+        if "触发止损" in content:
+            triggered = [l for l in lines if "触发止损" in l]
+            result["subtasks"].append({"step": "止损检查", "result": f"触发 {len(triggered)} 只"})
+        elif "No stop-loss" in content or "无止损" in content or "stop_loss_triggered: 0" in content.lower():
+            result["subtasks"].append({"step": "止损检查", "result": "无触发"})
+        elif "check-stoploss" in content.lower():
+            result["subtasks"].append({"step": "止损检查", "result": "执行中"})
+
+        # snapshot result
+        if "snapshot" in content.lower():
+            if "Saved snapshot" in content or "snapshots.csv" in content:
+                result["subtasks"].append({"step": "持仓快照", "result": "已保存"})
+            else:
+                result["subtasks"].append({"step": "持仓快照", "result": "执行中"})
+
+    return result
+
+
 def collect_status():
     """Collect system status information."""
     status = {
@@ -59,7 +150,8 @@ def collect_status():
         "stoploss_count": 0,
         "stoploss_list": [],
         "signal_latest": "",
-        "disk_free_gb": 0.0
+        "disk_free_gb": 0.0,
+        "tasks": [],
     }
 
     # Check QMT process
@@ -117,12 +209,21 @@ def collect_status():
     except Exception:
         pass
 
-    # Check if today's task log exists
+    # Parse today's task logs
     today_str = date.today().strftime("%Y-%m-%d")
-    log_dir = PROJECT_DIR / "logs"
-    if log_dir.exists():
-        today_logs = list(log_dir.glob(f"*{today_str}*"))
-        status["daily_task_done"] = len(today_logs) > 0
+    rebalance_log = LOG_DIR / f"rebalance_{today_str}.log"
+    stoploss_log = LOG_DIR / f"stoploss_{today_str}.log"
+
+    rebalance = _parse_task_log(rebalance_log, "Rebalance")
+    stoploss = _parse_task_log(stoploss_log, "Stoploss")
+    status["tasks"] = [rebalance, stoploss]
+
+    # daily_task_done: ignore tasks that haven't triggered yet (no_log)
+    triggered = [t for t in status["tasks"] if t["status"] != "no_log"]
+    status["daily_task_done"] = (
+        len(triggered) > 0 and
+        all(t["status"] in ("done", "skipped") for t in triggered)
+    )
 
     return status
 
@@ -151,7 +252,7 @@ def get_stock_name(code, names):
 
 
 def collect_portfolio():
-    """Collect current portfolio from latest live signal or stoploss data."""
+    """Collect current portfolio from live snapshots or signal files."""
     names = load_stock_names()
     portfolio = {
         "timestamp": datetime.now().isoformat(),
@@ -170,7 +271,54 @@ def collect_portfolio():
         except Exception:
             pass
 
-    # Try to read positions from latest output
+    # Priority 1: live trading snapshots (real QMT positions)
+    snapshot_path = PROJECT_DIR / "output" / "live_trading" / "snapshots.csv"
+    if snapshot_path.exists():
+        try:
+            import csv
+            with open(snapshot_path) as f:
+                rows = list(csv.DictReader(f))
+            if rows:
+                latest = sorted(rows, key=lambda r: r.get("date", ""))[-1]
+                positions_json = latest.get("positions_json", "[]")
+                positions = json.loads(positions_json)
+
+                # Get latest prices for PnL calc
+                db_path = PROJECT_DIR / "data" / "baostock.db"
+                latest_prices = {}
+                if db_path.exists():
+                    conn = sqlite3.connect(str(db_path))
+                    for p in positions:
+                        code = p.get("code", "")
+                        for variant in [code, code.upper(), code.lower()]:
+                            row = conn.execute(
+                                "SELECT close FROM kline WHERE code=? ORDER BY date DESC LIMIT 1",
+                                (variant,)
+                            ).fetchone()
+                            if row and row[0]:
+                                latest_prices[code] = float(row[0])
+                                break
+                    conn.close()
+
+                for p in positions:
+                    code = p.get("code", "")
+                    cost = float(p.get("cost_price", 0))
+                    current = latest_prices.get(code, 0)
+                    pnl_pct = (current - cost) / cost if cost > 0 and current > 0 else 0
+                    portfolio["positions"].append({
+                        "code": code,
+                        "name": get_stock_name(code, names),
+                        "shares": int(p.get("shares", 0)),
+                        "cost_price": cost,
+                        "current_price": current,
+                        "pnl_pct": round(pnl_pct, 4),
+                    })
+                if portfolio["positions"]:
+                    return portfolio
+        except Exception as e:
+            print(f"  Warning: snapshot portfolio error: {e}")
+
+    # Priority 2: signal files (fallback)
     output_dir = PROJECT_DIR / "output"
     signal_files = sorted(output_dir.glob("live_signal_*.csv"), reverse=True)
     if signal_files:
@@ -196,13 +344,38 @@ def collect_portfolio():
 
 
 def collect_nav():
-    """Collect nav records from backtest results or live tracking."""
+    """Collect nav records from live snapshots or backtest results."""
     records = []
 
-    # Try live nav tracking first
+    # Priority 1: live trading snapshots (from track_live_performance.py)
+    snapshot_path = PROJECT_DIR / "output" / "live_trading" / "snapshots.csv"
+    if snapshot_path.exists():
+        try:
+            import csv
+            with open(snapshot_path) as f:
+                rows = list(csv.DictReader(f))
+            prev_value = None
+            for row in sorted(rows, key=lambda r: r.get("date", "")):
+                total = float(row.get("total_asset", 0))
+                daily_ret = 0.0
+                if prev_value and prev_value > 0:
+                    daily_ret = (total - prev_value) / prev_value
+                records.append({
+                    "date": row.get("date", ""),
+                    "total_value": total,
+                    "daily_return": round(daily_ret, 6),
+                    "n_positions": int(float(row.get("n_positions", 0)))
+                })
+                prev_value = total
+            if records:
+                return {"records": records}
+        except Exception as e:
+            print(f"  Warning: snapshot collection error: {e}")
+
+    # Priority 2: legacy live_nav.csv
     nav_path = PROJECT_DIR / "output" / "live_nav.csv"
     if not nav_path.exists():
-        # Fall back to backtest results
+        # Priority 3: backtest results
         nav_path = PROJECT_DIR / "output" / "backtest_results.csv"
 
     if nav_path.exists():
@@ -220,6 +393,31 @@ def collect_nav():
                     records.append(rec)
         except Exception as e:
             print(f"  Warning: nav collection error: {e}")
+
+    return {"records": records}
+
+
+def collect_backtest_nav():
+    """Collect backtest NAV from backtest_results.csv for comparison overlay."""
+    records = []
+    bt_path = PROJECT_DIR / "output" / "backtest_results.csv"
+    if not bt_path.exists():
+        return {"records": records}
+
+    try:
+        import csv
+        with open(bt_path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rec = {
+                    "date": row.get("date", ""),
+                    "total_value": float(row.get("total_value", row.get("portfolio_value", 0))),
+                    "daily_return": float(row.get("daily_return", row.get("return", 0))),
+                    "n_positions": int(float(row.get("n_positions", 0)))
+                }
+                records.append(rec)
+    except Exception as e:
+        print(f"  Warning: backtest nav collection error: {e}")
 
     return {"records": records}
 
@@ -258,6 +456,14 @@ def main():
         post_json(server, "/api/push/nav", nav)
     else:
         print("  (no nav data found)")
+
+    # Push backtest nav (for comparison overlay)
+    print("\n[Backtest NAV]")
+    bt_nav = collect_backtest_nav()
+    if bt_nav["records"]:
+        post_json(server, "/api/push/backtest_nav", bt_nav)
+    else:
+        print("  (no backtest data found)")
 
     print("\nDone.")
 

@@ -90,6 +90,29 @@ async function loadStatus() {
       </div>
     </div>`;
 
+  // Task details
+  if (data.tasks && data.tasks.length) {
+    const statusMap = {
+      done: ['green', '已完成'],
+      skipped: ['', '跳过'],
+      running: ['yellow', '执行中'],
+      no_log: ['', '未触发'],
+      unknown: ['red', '异常'],
+      read_error: ['red', '日志读取失败'],
+    };
+    const taskNames = { Rebalance: '盘前任务 (09:31)', Stoploss: '盘后任务 (20:00)' };
+
+    html += `<div class="section"><div class="section-title">定时任务明细</div><table><tr><th>任务</th><th>状态</th><th>执行时间</th><th>子步骤</th></tr>`;
+    for (const t of data.tasks) {
+      const [cls, label] = statusMap[t.status] || ['red', t.status];
+      const name = taskNames[t.name] || t.name;
+      const subs = (t.subtasks || []).map(s => `${s.step}: ${s.result}`).join('<br>') || '-';
+      const time = t.time || '-';
+      html += `<tr><td>${name}</td><td><span class="dot ${cls}"></span>${label}</td><td>${time}</td><td>${subs}</td></tr>`;
+    }
+    html += `</table></div>`;
+  }
+
   if (data.stoploss_count > 0) {
     html += `
     <div class="section">
@@ -186,7 +209,11 @@ let currentPeriod = 90;
 
 async function loadNav(days) {
   if (days !== undefined) currentPeriod = days;
-  const navData = await API.getNav(currentPeriod === 0 ? 99999 : currentPeriod);
+  const queryDays = currentPeriod === 0 ? 99999 : currentPeriod;
+  const [navData, backtestData] = await Promise.all([
+    API.getNav(queryDays),
+    API.getBacktestNav(queryDays),
+  ]);
 
   // Update period buttons
   document.querySelectorAll('.period-btn').forEach(btn => {
@@ -195,7 +222,7 @@ async function loadNav(days) {
 
   if (!navData || !navData.length) {
     document.getElementById('nav-stats').innerHTML = '';
-    renderNavChart('nav-chart', []);
+    renderNavChart('nav-chart', [], []);
     renderDrawdownChart('dd-chart', []);
     return;
   }
@@ -227,7 +254,7 @@ async function loadNav(days) {
     <div class="card"><div class="card-label">Sharpe</div><div class="card-value sm">${sharpe}</div></div>
   `;
 
-  renderNavChart('nav-chart', navData);
+  renderNavChart('nav-chart', navData, backtestData);
   renderDrawdownChart('dd-chart', navData);
 }
 
