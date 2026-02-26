@@ -84,11 +84,10 @@ def _parse_task_log(log_path, task_name):
         result["subtasks"].append({"step": "交易日检查", "result": "非交易日，跳过"})
         return result
 
-    # Extract start/end times
-    # Log format: "===== Rebalance 2026-02-24  9:31:02.24 ====="
+    # Extract completion time from last "===== Done 2026-02-24 22:08:22.11 ====="
     import re
-    for l in lines:
-        if "=====" in l and task_name.lower() in l.lower():
+    for l in reversed(lines):
+        if "=====" in l and "Done" in l:
             m = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})', l)
             if m:
                 result["time"] = f"{m.group(1)} {m.group(2)}"
@@ -271,7 +270,29 @@ def collect_portfolio():
         except Exception:
             pass
 
-    # Priority 1: live trading snapshots (real QMT positions)
+    # Priority 0: live_holdings.json (from check-stoploss / live rebalance)
+    holdings_path = PROJECT_DIR / "output" / "live_holdings.json"
+    if holdings_path.exists():
+        try:
+            with open(holdings_path) as f:
+                holdings = json.load(f)
+            for p in holdings.get("positions", []):
+                code = p.get("code", "")
+                portfolio["positions"].append({
+                    "code": code,
+                    "name": get_stock_name(code, names),
+                    "shares": int(p.get("shares", 0)),
+                    "cost_price": float(p.get("cost_price", 0)),
+                    "current_price": float(p.get("current_price", 0)),
+                    "pnl_pct": float(p.get("pnl_pct", 0)),
+                })
+            if portfolio["positions"]:
+                portfolio["timestamp"] = holdings.get("timestamp", portfolio["timestamp"])
+                return portfolio
+        except Exception as e:
+            print(f"  Warning: live_holdings.json error: {e}")
+
+        # Priority 1: live trading snapshots (real QMT positions)
     snapshot_path = PROJECT_DIR / "output" / "live_trading" / "snapshots.csv"
     if snapshot_path.exists():
         try:
