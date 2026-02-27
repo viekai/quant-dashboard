@@ -44,5 +44,7 @@ const API = {
   async getNav(days = 90) { return this._get(`/api/nav?days=${days}`); },
   async getTrades(limit = 50) { return this._get(`/api/trades?limit=${limit}`); },
   async getSignal() { return this._get('/api/signal/latest'); },
+  async getBacktestNav(days = 90) { return this._get(`/api/nav/backtest?days=${days}`); },
   async getFactorWeights() { return this._get('/api/factor/weights'); },
+  async getLiveStatus(force = false) { return this._get(`/api/status/live${force ? '?force=1' : ''}`); },
 };

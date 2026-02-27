@@ -47,6 +47,13 @@ class Database:
                 timestamp TEXT NOT NULL,
                 data TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS backtest_nav (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT UNIQUE NOT NULL,
+                total_value REAL NOT NULL,
+                daily_return REAL DEFAULT 0,
+                n_positions INTEGER DEFAULT 0
+            );
         """)
         conn.commit()
         conn.close()
@@ -143,6 +150,31 @@ class Database:
         )
         conn.commit()
         conn.close()
+
+    # -- Backtest NAV --
+    def save_backtest_nav(self, records: list):
+        conn = self._conn()
+        for rec in records:
+            conn.execute(
+                """INSERT INTO backtest_nav (date, total_value, daily_return, n_positions)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(date) DO UPDATE SET
+                     total_value=excluded.total_value,
+                     daily_return=excluded.daily_return,
+                     n_positions=excluded.n_positions""",
+                (rec["date"], rec["total_value"], rec.get("daily_return", 0), rec.get("n_positions", 0)),
+            )
+        conn.commit()
+        conn.close()
+
+    def get_backtest_nav(self, days: int = 30) -> list:
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT date, total_value, daily_return, n_positions FROM backtest_nav ORDER BY date DESC LIMIT ?",
+            (days,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in reversed(rows)]
 
     def get_latest_signal(self) -> dict | None:
         conn = self._conn()

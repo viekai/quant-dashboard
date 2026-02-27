@@ -13,6 +13,7 @@ const FACTOR_LABELS = {
   revenue_growth: '营收增速',
   ps: 'PS估值',
   roe: 'ROE',
+  industry_momentum: '行业动量',
 };
 
 const chartInstances = {};
@@ -24,7 +25,7 @@ function destroyChart(id) {
   }
 }
 
-function renderNavChart(canvasId, navData) {
+function renderNavChart(canvasId, navData, backtestData) {
   destroyChart(canvasId);
   const ctx = document.getElementById(canvasId);
   if (!ctx || !navData || !navData.length) return;
@@ -33,30 +34,47 @@ function renderNavChart(canvasId, navData) {
   const values = navData.map(d => d.total_value);
   const returns = navData.map(d => (d.daily_return || 0) * 100);
 
+  const datasets = [
+    {
+      label: '实盘净值',
+      data: values,
+      borderColor: '#4ecca3',
+      backgroundColor: 'rgba(78,204,163,0.1)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 0,
+      yAxisID: 'y',
+    },
+    {
+      label: '日收益%',
+      type: 'bar',
+      data: returns,
+      backgroundColor: returns.map(r => r >= 0 ? 'rgba(78,204,163,0.3)' : 'rgba(233,69,96,0.3)'),
+      yAxisID: 'y1',
+    },
+  ];
+
+  // Overlay backtest NAV if available
+  if (backtestData && backtestData.length) {
+    const btMap = {};
+    backtestData.forEach(d => { btMap[d.date] = d.total_value; });
+    const btValues = labels.map(date => btMap[date] !== undefined ? btMap[date] : null);
+    datasets.splice(1, 0, {
+      label: '回测净值',
+      data: btValues,
+      borderColor: '#f0a500',
+      borderDash: [6, 3],
+      backgroundColor: 'transparent',
+      fill: false,
+      tension: 0.3,
+      pointRadius: 0,
+      yAxisID: 'y',
+    });
+  }
+
   chartInstances[canvasId] = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: '净值',
-          data: values,
-          borderColor: '#4ecca3',
-          backgroundColor: 'rgba(78,204,163,0.1)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          yAxisID: 'y',
-        },
-        {
-          label: '日收益%',
-          type: 'bar',
-          data: returns,
-          backgroundColor: returns.map(r => r >= 0 ? 'rgba(78,204,163,0.3)' : 'rgba(233,69,96,0.3)'),
-          yAxisID: 'y1',
-        },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -65,7 +83,7 @@ function renderNavChart(canvasId, navData) {
         tooltip: {
           callbacks: {
             label(ctx) {
-              if (ctx.datasetIndex === 0) return `净值: ${ctx.parsed.y.toLocaleString()}`;
+              if (ctx.dataset.yAxisID === 'y') return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`;
               return `日收益: ${ctx.parsed.y.toFixed(2)}%`;
             },
           },

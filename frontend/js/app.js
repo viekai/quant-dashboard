@@ -56,22 +56,191 @@ async function loadTabData(tab) {
 }
 
 // ---- Status ----
-async function loadStatus() {
-  const data = await API.getStatus();
+async function loadStatus(forceRefresh = false) {
   const el = document.getElementById('status-content');
-  if (!data || data.message === 'no data') {
-    el.innerHTML = '<div class="empty">暂无数据，等待 ser9 推送...</div>';
+
+  // Try live pull first, fallback to push
+  let resp = await API.getLiveStatus(forceRefresh);
+  let liveData = null;
+  let isPull = false;
+
+  if (resp && resp.data) {
+    liveData = resp.data;
+    isPull = resp.source === 'pull';
+  }
+
+  // If pull failed entirely, fallback to push endpoint
+  if (!liveData) {
+    const pushData = await API.getStatus();
+    if (!pushData || pushData.message === 'no data') {
+      el.innerHTML = '<div class="empty">暂无数据，等待 ser9 推送或检查 SSH 链路...</div>';
+      return;
+    }
+    // Render legacy push format
+    renderPushStatus(el, pushData);
     return;
   }
 
+  renderLiveStatus(el, liveData, resp);
+}
+
+function renderLiveStatus(el, data, resp) {
+  const sys = data.system || {};
+  const db = data.database || {};
+  const tasks = data.tasks || {};
+  const holdings = data.holdings || {};
+
+  let html = '';
+
+  // A. Freshness banner
+  const ageSeconds = resp.cache_age_seconds || 0;
+  const ageText = ageSeconds < 0 ? '推送数据' :
+    ageSeconds < 60 ? `${Math.round(ageSeconds)} 秒前` :
+    `${Math.round(ageSeconds / 60)} 分钟前`;
+  const freshClass = resp.error ? 'stale' :
+    ageSeconds < 0 ? 'stale' :
+    ageSeconds < 120 ? 'fresh' :
+    ageSeconds < 600 ? 'warn' : 'stale';
+  const sourceLabel = resp.source === 'push_fallback' ? '推送数据' : '实时数据';
+  const errorNote = resp.error ? `<span class="freshness-error"> | ${resp.error}</span>` : '';
+
+  html += `
+    <div class="freshness-banner ${freshClass}">
+      <div class="freshness-left">
+        <span class="freshness-dot"></span>
+        <span>${sourceLabel} — ${ageText}${errorNote}</span>
+      </div>
+      <button class="refresh-btn" onclick="loadStatus(true)" title="强制刷新">&#x21bb;</button>
+    </div>`;
+
+  // B. System health cards
+  const qmtOk = sys.qmt_running;
+  const today = new Date().toISOString().slice(0, 10);
+  const klineDate = db.kline_last_date || '';
+  const klineFresh = klineDate === today ? 'green' :
+    klineDate >= today.replace(/\d{2}$/, m => String(Number(m) - 1).padStart(2, '0')) ? 'yellow' : 'red';
+
+  html += `
+    <div class="cards cards-4">
+      <div class="card">
+        <div class="card-label">QMT 状态</div>
+        <div class="card-value sm"><span class="dot ${qmtOk ? 'green' : 'red'}"></span>${qmtOk ? '运行中' : '未运行'}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">磁盘空间</div>
+        <div class="card-value sm">${sys.disk_free_gb || 0} GB</div>
+      </div>
+      <div class="card">
+        <div class="card-label">K线日期</div>
+        <div class="card-value sm"><span class="dot ${klineFresh}"></span>${klineDate || '-'}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">DB 一致性</div>
+        <div class="card-value sm"><span class="dot ${db.kline_consistent ? 'green' : 'red'}"></span>${db.kline_consistent ? '正常' : 'meta 不一致'}</div>
+      </div>
+    </div>`;
+
+  // C. Task cards
+  const taskMeta = {
+    rebalance: { label: 'QuantRebalance', icon: '&#9654;' },
+    stoploss: { label: 'QuantStoploss', icon: '&#9632;' },
+    sync: { label: 'QuantSync', icon: '&#8635;' },
+  };
+  const statusStyles = {
+    done: ['badge-green', '已完成'],
+    skipped: ['badge-gray', '跳过'],
+    running: ['badge-yellow pulse', '执行中'],
+    no_log: ['badge-gray-dashed', '未触发'],
+    read_error: ['badge-red', '读取失败'],
+  };
+
+  html += '<div class="task-cards">';
+  for (const [key, meta] of Object.entries(taskMeta)) {
+    const t = tasks[key] || {};
+    const [badgeClass, badgeLabel] = statusStyles[t.status] || ['badge-red', t.status || '未知'];
+    const completedAt = t.completed_at ? ` ${t.completed_at}` : '';
+    const subs = (t.subtasks || []);
+
+    html += `
+      <div class="task-card">
+        <div class="task-card-header">
+          <span class="task-card-title">${meta.label}</span>
+          <span class="task-card-schedule">${t.schedule || ''}</span>
+        </div>
+        <div class="task-card-status">
+          <span class="status-badge ${badgeClass}">${badgeLabel}</span>
+          <span class="task-card-time">${completedAt}</span>
+        </div>`;
+
+    if (subs.length) {
+      html += '<div class="task-card-steps">';
+      for (const s of subs) {
+        html += `<div class="task-step">${s.step}: <span class="task-step-result">${s.result}</span></div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // D. Holdings summary
+  const nPos = holdings.n_positions || 0;
+  const pendingSells = holdings.pending_sells || [];
+  const blCount = holdings.blacklist_count || 0;
+
+  html += `
+    <div class="section">
+      <div class="section-title">持仓摘要</div>
+      <div class="holdings-summary">
+        <span>${nPos} 只持仓</span>`;
+  if (pendingSells.length > 0) {
+    html += `<span class="holdings-alert">| 待卖出: ${pendingSells.join(', ')}</span>`;
+  }
+  if (blCount > 0) {
+    html += `<span class="holdings-dim">| 止损冷却: ${blCount} 只</span>`;
+  }
+  html += `</div></div>`;
+
+  // E. DB details (collapsible)
+  const recentCounts = db.kline_recent_counts || {};
+  const recentDates = Object.keys(recentCounts).sort().reverse();
+
+  html += `
+    <details class="collapsible">
+      <summary class="collapsible-title">DB 详情</summary>
+      <div class="collapsible-content">
+        <table>
+          <tr><th>日期</th><th>K线行数</th></tr>
+          ${recentDates.map(d => `<tr><td>${d}</td><td>${recentCounts[d]}</td></tr>`).join('')}
+        </table>
+        <div class="db-meta">
+          <span>财务最新: ${db.financial_last_yq || '-'}</span>
+          <span>DB大小: ${db.db_size_mb || 0} MB</span>
+          <span>meta日期: ${db.kline_last_date || '-'}</span>
+          <span>实际日期: ${db.kline_max_date || '-'}</span>
+        </div>
+      </div>
+    </details>`;
+
+  el.innerHTML = html;
+}
+
+function renderPushStatus(el, data) {
+  // Legacy push format rendering (simplified)
   const qmtClass = data.qmt_running ? 'green' : 'red';
   const qmtText = data.qmt_running ? '运行中' : '未运行';
   const taskClass = data.daily_task_done ? 'green' : 'yellow';
   const taskText = data.daily_task_done ? '已完成' : '未执行';
 
   let html = `
-    <div class="timestamp">更新时间: ${data.timestamp || '-'}</div>
-    <div class="cards">
+    <div class="freshness-banner stale">
+      <div class="freshness-left">
+        <span class="freshness-dot"></span>
+        <span>推送数据 — ${data.timestamp || '-'}</span>
+      </div>
+      <button class="refresh-btn" onclick="loadStatus(true)" title="强制刷新">&#x21bb;</button>
+    </div>
+    <div class="cards cards-4">
       <div class="card">
         <div class="card-label">QMT 状态</div>
         <div class="card-value sm"><span class="dot ${qmtClass}"></span>${qmtText}</div>
@@ -90,7 +259,6 @@ async function loadStatus() {
       </div>
     </div>`;
 
-  // Task details
   if (data.tasks && data.tasks.length) {
     const statusMap = {
       done: ['green', '已完成'],
@@ -100,7 +268,7 @@ async function loadStatus() {
       unknown: ['red', '异常'],
       read_error: ['red', '日志读取失败'],
     };
-    const taskNames = { Rebalance: '盘前任务 (09:31)', Stoploss: '盘后任务 (20:00)' };
+    const taskNames = { Rebalance: '盘前任务 (09:31)', Stoploss: '盘后任务 (21:00)', Sync: '数据同步 (03:00/05:00)' };
 
     html += `<div class="section"><div class="section-title">定时任务明细</div><table><tr><th>任务</th><th>状态</th><th>执行时间</th><th>子步骤</th></tr>`;
     for (const t of data.tasks) {
@@ -111,21 +279,6 @@ async function loadStatus() {
       html += `<tr><td>${name}</td><td><span class="dot ${cls}"></span>${label}</td><td>${time}</td><td>${subs}</td></tr>`;
     }
     html += `</table></div>`;
-  }
-
-  if (data.stoploss_count > 0) {
-    html += `
-    <div class="section">
-      <div class="section-title">止损黑名单 (${data.stoploss_count})</div>
-      <table>
-        <tr><th>股票代码</th></tr>
-        ${data.stoploss_list.map(c => `<tr><td>${c}</td></tr>`).join('')}
-      </table>
-    </div>`;
-  }
-
-  if (data.signal_latest) {
-    html += `<div class="section"><div class="section-title">最新信号文件</div><div>${data.signal_latest}</div></div>`;
   }
 
   el.innerHTML = html;

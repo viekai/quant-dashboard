@@ -1,5 +1,17 @@
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
+
+
+class TaskSubStep(BaseModel):
+    step: str = ""
+    result: str = ""
+
+
+class TaskResult(BaseModel):
+    name: str = ""
+    status: str = "unknown"  # done, skipped, running, no_log, unknown
+    subtasks: List[TaskSubStep] = []
+    time: str = ""
 
 
 class StatusPush(BaseModel):
@@ -11,6 +23,47 @@ class StatusPush(BaseModel):
     stoploss_list: List[str] = []
     signal_latest: str = ""
     disk_free_gb: float = 0.0
+    tasks: List[TaskResult] = []
+
+
+# ---- Live pull models ----
+
+class DBHealth(BaseModel):
+    kline_last_date: str = ""
+    kline_max_date: str = ""
+    kline_consistent: bool = True
+    kline_recent_counts: Dict[str, int] = {}
+    financial_last_yq: str = ""
+    db_size_mb: float = 0.0
+
+
+class TaskDetail(BaseModel):
+    schedule: str = ""
+    status: str = "no_log"  # done, skipped, running, no_log, read_error
+    completed_at: str = ""
+    subtasks: List[TaskSubStep] = []
+
+
+class HoldingsSummary(BaseModel):
+    n_positions: int = 0
+    pending_sells: List[str] = []
+    blacklist_count: int = 0
+
+
+class LiveStatusData(BaseModel):
+    collected_at: str = ""
+    system: Dict[str, Any] = {}
+    database: Dict[str, Any] = {}
+    tasks: Dict[str, Any] = {}
+    holdings: Dict[str, Any] = {}
+
+
+class LiveStatusResponse(BaseModel):
+    source: str = "pull"  # pull or push_fallback
+    cache_age_seconds: float = 0.0
+    refreshing: bool = False
+    error: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
 
 
 class Position(BaseModel):
@@ -42,6 +95,10 @@ class NavPush(BaseModel):
 class TradePush(BaseModel):
     timestamp: str
     trades: List[dict] = []
+
+
+class BacktestNavPush(BaseModel):
+    records: List[NavRecord]
 
 
 class SignalPush(BaseModel):
