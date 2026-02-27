@@ -185,15 +185,18 @@ class PullCache:
 
             self.fetching = True
             try:
-                # SSH chain: dashboard server → Mac Mini (port 6022) → ser9
+                # SSH chain: dashboard server → Mac Mini (frp:6022) → ser9
+                inner_cmd = (
+                    'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 '
+                    'kai@192.168.50.233 '
+                    """'& "C:\\Program Files\\Python311\\python.exe" """
+                    """C:\\Users\\kai\\quant_factor_model\\scripts\\collect_status.py'"""
+                )
                 cmd = [
                     "ssh", "-o", "StrictHostKeyChecking=no",
-                    "-o", f"ConnectTimeout=10",
+                    "-o", "ConnectTimeout=10",
                     "-p", "6022", "kai@localhost",
-                    "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "
-                    "kai@192.168.50.233 "
-                    "'cd C:\\Users\\kai\\quant_factor_model && "
-                    "\"C:\\Program Files\\Python311\\python.exe\" scripts/collect_status.py'"
+                    inner_cmd,
                 ]
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
