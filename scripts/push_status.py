@@ -371,10 +371,9 @@ def collect_portfolio():
 
 
 def collect_nav():
-    """Collect nav records from live snapshots or backtest results."""
+    """Collect nav records from live trading snapshots only."""
     records = []
 
-    # Priority 1: live trading snapshots (from track_live_performance.py)
     snapshot_path = PROJECT_DIR / "output" / "live_trading" / "snapshots.csv"
     if snapshot_path.exists():
         try:
@@ -394,30 +393,6 @@ def collect_nav():
                     "n_positions": int(float(row.get("n_positions", 0)))
                 })
                 prev_value = total
-            if records:
-                return {"records": records}
-        except Exception as e:
-            print(f"  Warning: snapshot collection error: {e}")
-
-    # Priority 2: legacy live_nav.csv
-    nav_path = PROJECT_DIR / "output" / "live_nav.csv"
-    if not nav_path.exists():
-        # Priority 3: backtest results
-        nav_path = PROJECT_DIR / "output" / "backtest_results.csv"
-
-    if nav_path.exists():
-        try:
-            import csv
-            with open(nav_path) as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    rec = {
-                        "date": row.get("date", ""),
-                        "total_value": float(row.get("total_value", row.get("portfolio_value", 0))),
-                        "daily_return": float(row.get("daily_return", row.get("return", 0))),
-                        "n_positions": int(float(row.get("n_positions", 0)))
-                    }
-                    records.append(rec)
         except Exception as e:
             print(f"  Warning: nav collection error: {e}")
 
