@@ -73,12 +73,17 @@ class Position(BaseModel):
     cost_price: float = 0.0
     current_price: float = 0.0
     pnl_pct: float = 0.0
+    target_weight: float = 0.0
+    composite_score: float = 0.0
+    rank: int = 0
+    factors: Dict[str, Any] = {}
 
 
 class PortfolioPush(BaseModel):
     timestamp: str
     positions: List[Position] = []
     blacklist: Dict[str, int] = {}
+    factor_weights: Dict[str, float] = {}
 
 
 class NavRecord(BaseModel):

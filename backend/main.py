@@ -30,18 +30,19 @@ db = Database()
 # Session tokens for web login (in-memory, restarts clear sessions)
 _valid_sessions: set[str] = set()
 
-FACTOR_WEIGHTS = {
-    "volatility_60d": 22.0,
-    "pe_ttm": 21.0,
-    "momentum_12_1": 16.7,
-    "turnover_20d": 12.5,
-    "profit_growth": 7.9,
-    "pb": 6.6,
-    "debt_ratio": 3.9,
-    "revenue_growth": 3.7,
-    "ps": 3.5,
-    "roe": 2.1,
-    "industry_momentum": 0.0,
+FACTOR_WEIGHTS_DEFAULT = {
+    "volatility_60": 0.204,
+    "pe_ttm": 0.069,
+    "momentum_12_1": 0.101,
+    "turnover_20d": 0.004,
+    "profit_growth": 0.109,
+    "pb": 0.114,
+    "debt_ratio": 0.054,
+    "revenue_growth": 0.034,
+    "ps": 0.043,
+    "roe": 0.014,
+    "high_52w": 0.125,
+    "intraday_range": 0.088,
 }
 
 
@@ -114,6 +115,12 @@ async def push_backtest_nav(data: BacktestNavPush, _=Depends(verify_token)):
     return {"ok": True, "count": len(data.records)}
 
 
+@app.post("/api/admin/clear-nav")
+async def clear_nav(_=Depends(verify_token)):
+    db.clear_nav()
+    return {"ok": True, "message": "NAV records cleared"}
+
+
 # ---- Read endpoints (require session cookie) ----
 
 @app.get("/api/status/latest")
@@ -151,7 +158,11 @@ async def get_backtest_nav(days: int = 30, _=Depends(verify_session)):
 
 @app.get("/api/factor/weights")
 async def get_factor_weights(_=Depends(verify_session)):
-    return FACTOR_WEIGHTS
+    # 优先从最新 portfolio push 获取动态权重
+    portfolio = db.get_current_portfolio()
+    if portfolio and portfolio.get("factor_weights"):
+        return portfolio["factor_weights"]
+    return FACTOR_WEIGHTS_DEFAULT
 
 
 # ---- Live pull from ser9 via SSH ----
