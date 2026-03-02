@@ -371,7 +371,7 @@ def collect_portfolio():
 
 
 def collect_nav():
-    """Collect nav records from live trading snapshots only."""
+    """Collect nav records from live trading snapshots (unit_nav)."""
     records = []
 
     snapshot_path = PROJECT_DIR / "output" / "live_trading" / "snapshots.csv"
@@ -380,19 +380,20 @@ def collect_nav():
             import csv
             with open(snapshot_path) as f:
                 rows = list(csv.DictReader(f))
-            prev_value = None
+            prev_nav = None
             for row in sorted(rows, key=lambda r: r.get("date", "")):
-                total = float(row.get("total_asset", 0))
+                # 优先用 unit_nav（份额净值），兼容旧格式 fallback total_asset
+                nav = float(row.get("unit_nav") or row.get("total_asset", 0))
                 daily_ret = 0.0
-                if prev_value and prev_value > 0:
-                    daily_ret = (total - prev_value) / prev_value
+                if prev_nav and prev_nav > 0:
+                    daily_ret = (nav - prev_nav) / prev_nav
                 records.append({
                     "date": row.get("date", ""),
-                    "total_value": total,
+                    "total_value": nav,
                     "daily_return": round(daily_ret, 6),
                     "n_positions": int(float(row.get("n_positions", 0)))
                 })
-                prev_value = total
+                prev_nav = nav
         except Exception as e:
             print(f"  Warning: nav collection error: {e}")
 
