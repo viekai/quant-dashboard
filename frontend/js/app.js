@@ -286,13 +286,37 @@ function renderPushStatus(el, data) {
 
 // ---- Portfolio ----
 async function loadPortfolio() {
-  const [portfolio, trades, signal] = await Promise.all([
-    API.getPortfolio(),
-    API.getTrades(20),
-    API.getSignal(),
-  ]);
+  // Try pull (live SSH) first, fallback to push endpoints
+  let portfolio = null;
+  let signal = null;
+  let source = 'push';
+
+  const liveResp = await API.getLiveStatus(false);
+  if (liveResp && liveResp.data) {
+    const h = liveResp.data.holdings;
+    const s = liveResp.data.signal;
+    if (h && h.positions && h.positions.length) {
+      portfolio = h;
+      source = 'pull';
+    }
+    if (s && s.signals && s.signals.length) {
+      signal = s;
+    }
+  }
+
+  // Fallback to push endpoints for missing data
+  const fallbacks = [];
+  if (!portfolio) fallbacks.push(API.getPortfolio().then(p => { portfolio = p; }));
+  if (!signal) fallbacks.push(API.getSignal().then(s => { signal = s; }));
+  fallbacks.push(API.getTrades(20));
+  const results = await Promise.all(fallbacks);
+  const trades = results[results.length - 1];
+
   const el = document.getElementById('portfolio-content');
   let html = '';
+
+  // Source indicator
+  html += `<div class="timestamp" style="text-align:right;font-size:11px;opacity:0.6">数据来源: ${source === 'pull' ? 'SSH实时' : '定时推送'}</div>`;
 
   // Positions
   if (portfolio && portfolio.positions && portfolio.positions.length) {
@@ -303,11 +327,12 @@ async function loadPortfolio() {
       <table>
         <tr><th>代码</th><th>名称</th><th>股数</th><th>成本价</th><th>现价</th><th>盈亏%</th></tr>
         ${portfolio.positions.map(p => {
-          const cls = p.pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg';
+          const pnl = p.pnl_pct || 0;
+          const cls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
           return `<tr>
             <td>${p.code}</td><td>${p.name || '-'}</td><td>${p.shares}</td>
-            <td>${p.cost_price.toFixed(2)}</td><td>${p.current_price.toFixed(2)}</td>
-            <td class="${cls}">${(p.pnl_pct * 100).toFixed(2)}%</td>
+            <td>${(p.cost_price || 0).toFixed(2)}</td><td>${(p.current_price || 0).toFixed(2)}</td>
+            <td class="${cls}">${(pnl * 100).toFixed(2)}%</td>
           </tr>`;
         }).join('')}
       </table>
@@ -342,9 +367,10 @@ async function loadPortfolio() {
 
   // Signal
   if (signal && signal.signals && signal.signals.length) {
+    const statusLabel = signal.status === 'pending' ? ' [待执行]' : '';
     html += `
     <div class="section">
-      <div class="section-title">最新信号 (${signal.timestamp || '-'})</div>
+      <div class="section-title">最新信号${statusLabel} (${signal.timestamp || '-'})</div>
       <table>
         <tr><th>代码</th><th>名称</th><th>权重</th></tr>
         ${signal.signals.slice(0, 20).map(s =>

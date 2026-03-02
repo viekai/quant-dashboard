@@ -112,11 +112,17 @@ def _parse_task_log(log_path, task_name):
             result["subtasks"].append({"step": "止损卖出", "result": "执行中"})
 
         # live rebalance result
-        if "不在调仓窗口" in content:
-            result["subtasks"].append({"step": "月度调仓", "result": "非调仓窗口，跳过"})
+        if "[DONE] Rebalance complete" in content:
+            result["subtasks"].append({"step": "月度调仓", "result": "已完成"})
+        elif "[INCOMPLETE]" in content:
+            result["subtasks"].append({"step": "月度调仓", "result": "部分完成"})
+        elif "target_weights.json" in content and ("already exists" in content or "信号已存在" in content):
+            result["subtasks"].append({"step": "月度调仓", "result": "重试中"})
+        elif "不在调仓窗口" in content or "非调仓窗口" in content:
+            result["subtasks"].append({"step": "月度调仓", "result": "非调仓日"})
         elif "调仓完成" in content or "Rebalance complete" in content:
             result["subtasks"].append({"step": "月度调仓", "result": "已完成"})
-        elif "live" in content.lower() and "Rebalance check" in content:
+        elif "live" in content.lower() and ("Rebalance check" in content or "rebalance" in content.lower()):
             result["subtasks"].append({"step": "月度调仓", "result": "执行中"})
 
     elif task_name == "Stoploss":
@@ -443,6 +449,60 @@ def collect_backtest_nav():
     return {"records": records}
 
 
+def collect_signal():
+    """Collect latest signal data from signal CSV and target_weights.json."""
+    import re
+    names = load_stock_names()
+    signal = {
+        "timestamp": datetime.now().isoformat(),
+        "signals": [],
+    }
+
+    output_dir = PROJECT_DIR / "output"
+
+    # Check target_weights.json (pending execution)
+    tw_path = output_dir / "target_weights.json"
+    has_pending = False
+    if tw_path.exists():
+        try:
+            with open(tw_path) as f:
+                tw = json.load(f)
+            weights = tw.get("weights", {})
+            if weights:
+                has_pending = True
+                for code, weight in sorted(
+                    weights.items(), key=lambda x: -x[1]
+                ):
+                    signal["signals"].append({
+                        "code": code,
+                        "name": get_stock_name(code, names),
+                        "weight": round(weight, 4),
+                    })
+        except Exception:
+            pass
+
+    # If no pending target_weights, read latest signal CSV
+    if not has_pending:
+        signal_files = sorted(output_dir.glob("live_signal_*.csv"), reverse=True)
+        if signal_files:
+            try:
+                import csv
+                with open(signal_files[0]) as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        code = row.get("code", "")
+                        weight = float(row.get("weight", 0))
+                        signal["signals"].append({
+                            "code": code,
+                            "name": get_stock_name(code, names),
+                            "weight": round(weight, 4),
+                        })
+            except Exception:
+                pass
+
+    return signal
+
+
 def main():
     parser = argparse.ArgumentParser(description="Push quant status to dashboard")
     parser.add_argument("--server", default=DEFAULT_SERVER, help="Dashboard server URL")
@@ -462,13 +522,21 @@ def main():
     status = collect_status()
     post_json(server, "/api/push/status", status)
 
-    if args.status_only:
-        return
-
-    # Push portfolio
+    # Always push portfolio + signal (lightweight, always useful)
     print("\n[Portfolio]")
     portfolio = collect_portfolio()
     post_json(server, "/api/push/portfolio", portfolio)
+
+    print("\n[Signal]")
+    signal = collect_signal()
+    if signal["signals"]:
+        post_json(server, "/api/push/signal", signal)
+    else:
+        print("  (no signal data found)")
+
+    if args.status_only:
+        print("\nDone (status-only, skipped nav/backtest).")
+        return
 
     # Push nav
     print("\n[NAV]")
